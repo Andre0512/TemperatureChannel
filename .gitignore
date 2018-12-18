@@ -1,0 +1,6 @@
+venv*/
+.idea/
+*.txt
+__pycache__/
+secrets.py
+*.pyc

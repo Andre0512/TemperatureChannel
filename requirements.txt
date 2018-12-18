@@ -1,0 +1,4 @@
+requests
+fhem
+pytz
+python-telegram-bot
