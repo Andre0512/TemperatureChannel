@@ -30,12 +30,15 @@ fh = fhem.Fhem(FHEM['server'], port=FHEM['port'], protocol=FHEM['protocol'], log
 
 
 def get_fhem(temp_list):
-    temp_list.update({FHEM_NAMES[k]: v for k, v in fh.get_readings(['humidity', 'temperature'], name="Temp.*").items()})
+    temp_list.update(
+        {FHEM_NAMES[k]: {x: {"Value": y['Value'], "Time": y['Time'].astimezone(pytz.timezone('Europe/Berlin'))} for x, y
+                         in v.items()} for k, v in fh.get_readings(['humidity', 'temperature'], name="Temp.*").items()})
 
 
 def get_heiz(temp_list):
     temp_list.update(
-        {HEIZ_LIST[z['name']]: {"temperature": {"Value": round(z['rawValue'] * 100) / 100, "Time": datetime.now()}}
+        {HEIZ_LIST[z['name']]: {"temperature": {"Value": round(z['rawValue'] * 100) / 100,
+                                                "Time": datetime.now().astimezone(pytz.timezone('Europe/Berlin'))}}
          for z in requests.get('http://{}:{}/api/v1/live-data/'.format(HEIZ['ip'], HEIZ['port'])).json() if
          z['name'] in HEIZ_LIST})
 
@@ -59,6 +62,17 @@ def group_temps(temp_list):
     return grouped_list
 
 
+def add_warnings(data):
+    if 'temperature' in data:
+        if data['temperature']['Time'] < datetime.utcnow().astimezone(pytz.timezone('Europe/Berlin')) - timedelta(
+                days=1):
+            return " ‼️"
+        elif data['temperature']['Time'] < datetime.utcnow().astimezone(pytz.timezone('Europe/Berlin')) - timedelta(
+                hours=2):
+            return " ⚠️"
+    return ""
+
+
 def less():
     g_list = get_list()
     result = ""
@@ -69,7 +83,7 @@ def less():
                 result += ("`{}°C `".format(round(float(vs['temperature']['Value']) * 10) / 10)).replace('.', ',')
             if 'humidity' in vs:
                 result += ("`{}% `".format(round(float(vs['humidity']['Value']) * 10) / 10)).replace('.', ',')
-            result += "{}\n".format(t)
+            result += "{}{}\n".format(t, add_warnings(vs))
         result += "\n"
     result += "_Aktualisiert: {}_".format(datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S"))
     return result
@@ -89,8 +103,8 @@ def more():
             if 'pressure' in vs:
                 result += ("Luftdruck: `{} hPa\n`".format(vs['pressure']['Value']))
             if 'temperature' in vs:
-                result += (
-                    "Aktualisiert: _{}_\n".format(datetime.strftime(vs['temperature']['Time'], "%Y-%m-%d %H:%M:%S")))
+                result += "Aktualisiert: _{}_{}\n".format(
+                    datetime.strftime(vs['temperature']['Time'], "%Y-%m-%d %H:%M:%S"), add_warnings(vs))
             result += "\n"
     result += "_Nachricht aktualisiert: {}_".format(datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S"))
     return result
