@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import fhem
 import pytz
 import requests
+from pymongo.mongo_client import MongoClient
 from telegram.bot import Bot
 from telegram.ext.callbackqueryhandler import CallbackQueryHandler
 from telegram.ext.updater import Updater
@@ -15,7 +16,7 @@ from telegram.inline.inlinekeyboardbutton import InlineKeyboardButton
 from telegram.inline.inlinekeyboardmarkup import InlineKeyboardMarkup
 from telegram.parsemode import ParseMode
 
-from secrets import FHEM, RASPBEE, HEIZ, RASPBEE_IDS, HEIZ_LIST, FHEM_NAMES, TELEGRAM, SENSORS, GROUPS, DEBUG
+from secrets import FHEM, RASPBEE, HEIZ, RASPBEE_IDS, HEIZ_LIST, FHEM_NAMES, TELEGRAM, SENSORS, GROUPS, DEBUG, MONGO
 
 if DEBUG:
     logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, format='%(levelname)s - %(message)s')
@@ -115,7 +116,22 @@ def get_list():
     get_fhem(temp_list)
     get_heiz(temp_list)
     get_raspbee(temp_list)
+    log_list(temp_list)
     return group_temps(temp_list)
+
+
+def log_list(new_list):
+    db = MongoClient(MONGO['HOST'], MONGO['PORT']).temperature
+    with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), "r") as read_file:
+        old_list = json.load(read_file)
+    for k, v in old_list.items():
+        for k2, v2 in v.items():
+            if not v[k2] == new_list[int(k)][k2]['Value']:
+                db.logs.insert_one(
+                    {"id": k, 'unit': k2, 'value': new_list[int(k)][k2]['Value'], 'time': datetime.now()})
+                logger.debug('{} - was {} - is {}'.format(k, v[k2], new_list[int(k)][k2]['Value']))
+    with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), 'w') as write_file:
+        json.dump({k: {k2: v2['Value'] for k2, v2 in v.items()} for k, v in new_list.items()}, write_file, indent=4)
 
 
 def get_keyboard(full):
@@ -126,7 +142,7 @@ def get_keyboard(full):
 
 
 def send(bot=None, full=False, force=False):
-    with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), "r") as read_file:
+    with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'view.json'), "r") as read_file:
         data = json.load(read_file)
     if not force and data and datetime.strptime(data[0][:19], '%Y-%m-%dT%H:%M:%S') > datetime.utcnow() - timedelta(
             minutes=3):
@@ -141,11 +157,11 @@ def answer_callback(bot, update):
     update.callback_query.answer()
     if update.callback_query.data == "more":
         send(bot, full=True)
-        with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), 'w') as write_file:
+        with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'view.json'), 'w') as write_file:
             json.dump([datetime.utcnow().isoformat()], write_file)
     elif update.callback_query.data == "less":
         send(bot, force=True)
-        with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), 'w') as write_file:
+        with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'view.json'), 'w') as write_file:
             json.dump([], write_file)
     logger.info("{} - {} - {}".format(update.callback_query.data, update.callback_query.from_user.first_name,
                                       update.callback_query.from_user.id))
@@ -162,10 +178,12 @@ def main():
 
 
 if __name__ == '__main__':
-    try:
+    if True:
         if len(sys.argv) > 1 and sys.argv[1] == "1":
             send()
         else:
             main()
+    try:
+        pass
     except Exception as e:
         logger.error(e)
