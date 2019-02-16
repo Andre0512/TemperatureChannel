@@ -16,7 +16,7 @@ from telegram.inline.inlinekeyboardbutton import InlineKeyboardButton
 from telegram.inline.inlinekeyboardmarkup import InlineKeyboardMarkup
 from telegram.parsemode import ParseMode
 
-from secrets import FHEM, RASPBEE, HEIZ, RASPBEE_IDS, HEIZ_LIST, FHEM_NAMES, TELEGRAM, SENSORS, GROUPS, DEBUG, MONGO
+from secrets import DEBUG, FHEM, FHEM_NAMES, GROUPS, HEIZ, HEIZ_LIST, MONGO, RASPBEE, RASPBEE_IDS, SENSORS, TELEGRAM
 
 if DEBUG:
     logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, format='%(levelname)s - %(message)s')
@@ -37,11 +37,14 @@ def get_fhem(temp_list):
 
 
 def get_heiz(temp_list):
-    temp_list.update(
-        {HEIZ_LIST[z['name']]: {"temperature": {"Value": round(z['rawValue'] * 100) / 100,
-                                                "Time": datetime.now().astimezone(pytz.timezone('Europe/Berlin'))}}
-         for z in requests.get('http://{}:{}/api/v1/live-data/'.format(HEIZ['ip'], HEIZ['port'])).json() if
-         z['name'] in HEIZ_LIST})
+    try:
+        temp_list.update(
+            {HEIZ_LIST[z['name']]: {"temperature": {"Value": round(z['rawValue'] * 100) / 100,
+                                                    "Time": datetime.now().astimezone(pytz.timezone('Europe/Berlin'))}}
+             for z in requests.get('http://{}:{}/api/v1/live-data/'.format(HEIZ['ip'], HEIZ['port'])).json() if
+             z['name'] in HEIZ_LIST})
+    except requests.exceptions.ConnectionError:
+        logger.error("Couldn't read from Heizung")
 
 
 def get_raspbee(temp_list):
@@ -126,10 +129,16 @@ def log_list(new_list):
         old_list = json.load(read_file)
     for k, v in old_list.items():
         for k2, v2 in v.items():
-            if not v[k2] == new_list[int(k)][k2]['Value']:
+            if k2 in v and k in new_list and k2 in k and not v[k2] == new_list[int(k)][k2]['Value']:
                 db.logs.insert_one(
                     {"id": k, 'unit': k2, 'value': new_list[int(k)][k2]['Value'], 'time': datetime.now()})
                 logger.debug('{} - was {} - is {}'.format(k, v[k2], new_list[int(k)][k2]['Value']))
+            else:
+                if not int(k) in new_list:
+                    new_list[int(k)] = {}
+                if k2 not in new_list[int(k)]:
+                    new_list[int(k)][k2] = {'Value': v[k2], 'Time': datetime.utcnow().astimezone(
+                        pytz.timezone('Europe/Berlin')) - timedelta(days=1, minutes=1)}
     with open("{}/{}".format(os.path.dirname(os.path.realpath(__file__)), 'data.json'), 'w') as write_file:
         json.dump({k: {k2: v2['Value'] for k2, v2 in v.items()} for k, v in new_list.items()}, write_file, indent=4)
 
